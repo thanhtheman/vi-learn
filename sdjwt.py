@@ -176,3 +176,47 @@ def resolve_disclosures(sd_jwt: Sdjwt) -> dict:
         result["delegate_payload"] = resolved_delegate
     return result
 
+@dataclass
+class KbSdJwt():
+    holder_header: str
+    holder_payload: str
+    signature: bytes
+
+    @property
+    def jwt(self) -> str:
+        h = _b64_url_encode(json.dumps(self.holder_header, separators=[",",":"]).encode())
+        p = _b64_url_encode(json.dumps(self.holder_payload, separators=[",",":"]).encode())
+        return f"{h}.{p}.{_b64_url_encode(self.signature)}"
+
+@dataclass
+class SdKbWithJwt():
+    sd_jwt: Sdjwt
+    kb_jwt: KbSdJwt
+    disclosed_indices: list[int] | None = None
+
+    @property
+    def sd_kb_jwt(self) -> str:
+        serialized = self.sd_jwt.serialize(include_disclosure=self.disclosed_indices)
+        return serialized + self.kb_jwt.jwt
+
+def create_kb_sd_jwt(
+        sd_jwt: Sdjwt,
+        holder_header: str,
+        holder_payload: str,
+        private_key: ec.EllipticCurvePrivateKey,
+        disclosed_indices: list[int] | None = None
+) -> SdKbWithJwt:
+    if "sd_hash" not in holder_payload:
+        serialized = sd_jwt.serialize(include_disclosure=disclosed_indices)
+        holder_payload["sd_hash"] = hash_bytes(serialized.encode("ascii"))
+    
+    jwt = _jwt_encode(holder_header, holder_payload, private_key)
+    h, p, signature = _jwt_decode(jwt)
+    kb_jwt = KbSdJwt(h, p, signature)
+    return SdKbWithJwt(sd_jwt, kb_jwt, disclosed_indices)
+
+def verify_kb_jwt(kb_jwt: KbSdJwt, public_key: ec.EllipticCurvePublicKey) -> bool:
+    h = _b64_url_encode(json.dumps(kb_jwt.holder_header, separators=[",",":"]).encode())
+    p = _b64_url_encode(json.dumps(kb_jwt.holder_payload, separators=[",",":"]).encode())
+    signing_input = f"{h}.{p}".encode("ascii")
+    return es256_verify(signing_input, kb_jwt.signature, public_key)
