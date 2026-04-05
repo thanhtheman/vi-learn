@@ -234,3 +234,86 @@ def parse_constraint(data: dict) -> Constraint:
     return obj
 
 
+class MandateMode(str, Enum):
+    IMMEDIATE = "IMMEDIATE"
+    AUTONOMOUS = "AUTONOMOUS"
+
+@dataclass
+class CheckoutMandate:
+    vct: str = "mandate.checkout.open"
+    cnf_jwk: dict | None = None
+    cnf_kid: str | None = None
+    constraints: list[Constraint] = field(default_factory=list)
+    checkout_jwt: str | None = None
+    checkout_hash: str | None = None
+
+    def __post_init__(self):
+        if self.cnf_jwk and self.checkout_jwt is not None:
+            raise ValueError("CheckoutMandate cannot have both cnf_jwk(autonomous) and checkout_jwt(immediate)")
+    def to_dict(self) -> dict:
+        d: dict[str, Any] = {
+            "vct": self.vct
+        }
+        if self.cnf_jwk:
+            cnf: dict[str, Any] = {"jwt": self.cnf_jwk}
+            if self.cnf_kid:
+                cnf["kid"] = self.cnf_kid
+            d["cnf"] = cnf
+        d["constraints"] = {c.to_dict() for c in self.constraints}
+        if self.checkout_jwt is not None:
+            d["checkout_jwt"] = self.checkout_jwt
+        if self.checkout_hash is not None:
+            d["checkout_hash"] = self.checkout_hash
+        return d
+    
+@dataclass
+class PaymentMandate:
+    vct: str = "mandate.payment.open"
+    cnf_jwt: dict[str, Any] | None = None
+    cnf_kid: str | None = None
+    constraints: list[Constraint] = field(default_factory=list)
+    payment_instruments: dict | None = None
+    risk_data: dict | None = None
+    payee: dict | None = None
+    currency: str | None = None
+    amount: int | None = None
+    transaction_id: str | None = None
+
+    def __post_init__(self):
+        has_immediate = self.amount is not None
+        has_autonomous = self.cnf_jwt is not None
+        if has_autonomous and has_immediate:
+            raise ValueError("PaymentMandate cannot have both cnf_jwt(autonomous) and amount (immediate)")
+    
+    def to_dict(self) -> dict:
+        d: dict[str, Any] = {"vct": self.vct}
+        if self.cnf_jwt is not None:
+            cnf: dict[str, Any] = {"jwt": self.cnf_jwt}
+            if self.cnf_kid is not None:
+                cnf["kid"] = self.cnf_kid
+            d["cnf"] = cnf
+        if self.payment_instruments is not None:
+            d["payment_instruments"] = self.payment_instruments
+        if self.risk_data is not None:
+            d["risk_data"] = self.risk_data
+        if self.currency is not None and self.amount is not None:
+            d["payment_amount"] = {"currency": self.currency, "amount": self.amount}
+        if self.transaction_id is not None:
+            d["transaction_id"] = self.transaction_id
+        return d
+    
+@dataclass
+class UserMandate:
+    nonce: str
+    aud: str
+    iat: int
+    mode: MandateMode
+    iss: str | None = None
+    exp: int | None = None
+    sd_hash: str = ""
+    prompt_summary: str | None = None
+    checkout_mandage: CheckoutMandate | None = None
+    payment_mandate: PaymentMandate | None = None
+    merchants: list[dict] = field(default_factory=list)
+    acceptable_items: list[dict] = field(default_factory=list)
+
