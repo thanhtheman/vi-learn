@@ -148,3 +148,89 @@ class PaymentBudgetConstraint(Constraint):
         }
         d.update(self.extra_fields)
         return d
+
+@dataclass
+class PaymentRecurrenceConstraint(Constraint):
+    """Subscription setup terms for merchant-initiated recurring. Network-enforced."""
+
+    frequency: str = ""  # e.g. "MONTHLY", "ANNUALLY"
+    start_date: str = ""  # ISO 8601
+    end_date: str | None = None  # ISO 8601, optional
+    number: int | None = None  # Max occurrences, optional
+
+    def __post_init__(self):
+        self.type = "payment.recurrence"
+
+    def to_dict(self) -> dict:
+        d: dict[str, Any] = {
+            "type": self.type,
+            "frequency": self.frequency,
+            "start_date": self.start_date,
+        }
+        if self.end_date is not None:
+            d["end_date"] = self.end_date
+        if self.number is not None:
+            d["number"] = self.number
+        d.update(self.extra_fields)
+        return d
+
+
+@dataclass
+class AgentRecurrenceConstraint(Constraint):
+    """Agent-managed recurring transaction terms. Network-enforced."""
+
+    frequency: str = ""  # e.g. "WEEKLY", "MONTHLY"
+    start_date: str = ""  # ISO 8601
+    end_date: str = ""  # ISO 8601, required
+    max_occurrences: int | None = None  # Optional cap
+
+    def __post_init__(self):
+        self.type = "payment.agent_recurrence"
+
+    def to_dict(self) -> dict:
+        d: dict[str, Any] = {
+            "type": self.type,
+            "frequency": self.frequency,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+        }
+        if self.max_occurrences is not None:
+            d["max_occurrences"] = self.max_occurrences
+        d.update(self.extra_fields)
+        return d
+
+
+_REGISTRY: dict[str, type[Constraint]] = {
+    "mandate.checkout.allowed_merchant": AllowedMerchantConstraint,
+    "mandate.checkout.line_items": CheckoutLineItemsConstraint,
+    "mandate.allowed_payee": AllowedPayeeConstraint,
+    "payment.amount": PaymentAmountConstraint,
+    "payment.reference": ReferenceConstraint,
+    "payment.budget": PaymentBudgetConstraint,
+    "payment.recurrence": PaymentRecurrenceConstraint,
+    "payment.agent_recurrence": AgentRecurrenceConstraint
+} 
+
+
+def parse_constraint(data: dict) -> Constraint:
+    if isinstance(data, Constraint):
+        return Constraint(type="unknown")
+    ctype = data.get("type", "")
+    cls = _REGISTRY.get(ctype)
+    if cls is None:
+        return Constraint(type=ctype, extra_fields={k: v for k,v in data.items() if k != "type"})
+    known_fields = {f.name for f in cls.__dataclass_fields__.values()} - {"type", "extra_fields"}
+    kwargs = {}
+    extra = {}
+    for k, v in data.items():
+        if k != "type":
+            continue
+        if k in known_fields:
+            kwargs[k] = v
+        else:
+            extra[k] = v
+    obj = cls(type=ctype, **kwargs)
+    obj.extra_fields = extra
+    return obj
+
+
